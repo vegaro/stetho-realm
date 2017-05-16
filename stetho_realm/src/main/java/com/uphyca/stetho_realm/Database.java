@@ -36,16 +36,6 @@ import io.realm.internal.Table;
 @SuppressWarnings("WeakerAccess")
 public class Database implements ChromeDevtoolsDomain {
 
-    private static final String NULL = "[null]";
-
-    private final RealmPeerManager realmPeerManager;
-    private final ObjectMapper objectMapper;
-    private final boolean withMetaTables;
-    private final long limit;
-    private final boolean ascendingOrder;
-
-    private DateFormat dateTimeFormatter;
-
     private enum StethoRealmFieldType {
         INTEGER(0),
         BOOLEAN(1),
@@ -97,395 +87,135 @@ public class Database implements ChromeDevtoolsDomain {
              boolean ascendingOrder,
              byte[] defaultEncryptionKey,
              Map<String, byte[]> encryptionKeys) {
-        this.realmPeerManager = new RealmPeerManager(packageName, filesProvider, defaultEncryptionKey, encryptionKeys);
-        this.objectMapper = new ObjectMapper();
-        this.withMetaTables = withMetaTables;
-        this.limit = limit;
-        this.ascendingOrder = ascendingOrder;
     }
 
     @ChromeDevtoolsMethod
     @SuppressWarnings("unused")
     public void enable(JsonRpcPeer peer, JSONObject params) {
-        realmPeerManager.addPeer(peer);
     }
 
     @ChromeDevtoolsMethod
     @SuppressWarnings("unused")
     public void disable(JsonRpcPeer peer, JSONObject params) {
-        realmPeerManager.removePeer(peer);
     }
 
     @ChromeDevtoolsMethod
     @SuppressWarnings("unused")
     public JsonRpcResult getDatabaseTableNames(JsonRpcPeer peer, JSONObject params) {
-        GetDatabaseTableNamesRequest request = objectMapper.convertValue(params, GetDatabaseTableNamesRequest.class);
-        GetDatabaseTableNamesResponse response = new GetDatabaseTableNamesResponse();
-        response.tableNames = realmPeerManager.getDatabaseTableNames(request.databaseId, withMetaTables);
-        return response;
+        return null;
     }
 
     @ChromeDevtoolsMethod
     @SuppressWarnings("unused")
-    public JsonRpcResult executeSQL(JsonRpcPeer peer, JSONObject params) {
-        ExecuteSQLRequest request = this.objectMapper.convertValue(params, ExecuteSQLRequest.class);
-
-        try {
-            return realmPeerManager.executeSQL(request.databaseId, request.query,
-                    new RealmPeerManager.ExecuteResultHandler<ExecuteSQLResponse>() {
-                        public ExecuteSQLResponse handleRawQuery() throws SQLiteException {
-                            ExecuteSQLResponse response = new ExecuteSQLResponse();
-                            response.columnNames = Collections.singletonList("success");
-                            response.values = Collections.<Object>singletonList("true");
-                            return response;
-                        }
-
-                        public ExecuteSQLResponse handleSelect(Table table, boolean addRowIndex) throws SQLiteException {
-                            ExecuteSQLResponse response = new ExecuteSQLResponse();
-
-                            final ArrayList<String> columnNames = new ArrayList<>();
-                            if (addRowIndex) {
-                                columnNames.add("<index>");
-                            }
-                            for (int i = 0; i < table.getColumnCount(); i++) {
-                                columnNames.add(table.getColumnName(i));
-                            }
-
-                            response.columnNames = columnNames;
-                            response.values = flattenRows(table, limit, addRowIndex);
-                            return response;
-                        }
-
-                        public ExecuteSQLResponse handleInsert(long insertedId) throws SQLiteException {
-                            ExecuteSQLResponse response = new ExecuteSQLResponse();
-                            response.columnNames = Collections.singletonList("ID of last inserted row");
-                            response.values = Collections.<Object>singletonList(insertedId);
-                            return response;
-                        }
-
-                        public ExecuteSQLResponse handleUpdateDelete(int count) throws SQLiteException {
-                            ExecuteSQLResponse response = new ExecuteSQLResponse();
-                            response.columnNames = Collections.singletonList("Modified rows");
-                            response.values = Collections.<Object>singletonList(count);
-                            return response;
-                        }
-                    });
-        } catch (SQLiteException e) {
-            Error error = new Error();
-            error.code = 0;
-            error.message = e.getMessage();
-            ExecuteSQLResponse response = new ExecuteSQLResponse();
-            response.sqlError = error;
-            return response;
-        }
+    public JsonRpcResult executeSQL(JsonRpcPeer peer, JSONObject params) {         ExecuteSQLResponse response = new ExecuteSQLResponse();
+        return null;
     }
 
     private List<Object> flattenRows(Table table, long limit, boolean addRowIndex) {
-        Util.throwIfNot(limit >= 0);
-        final List<Object> flatList = new ArrayList<>();
-        long numColumns = table.getColumnCount();
-
-        final RowFetcher rowFetcher = RowFetcher.getInstance();
-        final long tableSize = table.size();
-        for (long index = 0; index < limit && index < tableSize; index++) {
-            final long row = ascendingOrder ? index : (tableSize - index - 1);
-            final RowWrapper rowData = RowWrapper.wrap(rowFetcher.getRow(table, row));
-            if (addRowIndex) {
-                flatList.add(rowData.getIndex());
-            }
-            for (int column = 0; column < numColumns; column++) {
-                switch (rowData.getColumnType(column)) {
-                    case INTEGER:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            flatList.add(rowData.getLong(column));
-                        }
-                        break;
-                    case BOOLEAN:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            flatList.add(rowData.getBoolean(column));
-                        }
-                        break;
-                    case STRING:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            flatList.add(rowData.getString(column));
-                        }
-                        break;
-                    case BINARY:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            flatList.add(rowData.getBinaryByteArray(column));
-                        }
-                        break;
-                    case FLOAT:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            final float aFloat = rowData.getFloat(column);
-                            if (Float.isNaN(aFloat)) {
-                                flatList.add("NaN");
-                            } else if (aFloat == Float.POSITIVE_INFINITY) {
-                                flatList.add("Infinity");
-                            } else if (aFloat == Float.NEGATIVE_INFINITY) {
-                                flatList.add("-Infinity");
-                            } else {
-                                flatList.add(aFloat);
-                            }
-                        }
-                        break;
-                    case DOUBLE:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            final double aDouble = rowData.getDouble(column);
-                            if (Double.isNaN(aDouble)) {
-                                flatList.add("NaN");
-                            } else if (aDouble == Double.POSITIVE_INFINITY) {
-                                flatList.add("Infinity");
-                            } else if (aDouble == Double.NEGATIVE_INFINITY) {
-                                flatList.add("-Infinity");
-                            } else {
-                                flatList.add(aDouble);
-                            }
-                        }
-                        break;
-                    case OLD_DATE:
-                    case DATE:
-                        if (rowData.isNull(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            flatList.add(formatDate(rowData.getDate(column)));
-                        }
-                        break;
-                    case OBJECT:
-                        if (rowData.isNullLink(column)) {
-                            flatList.add(NULL);
-                        } else {
-                            flatList.add(rowData.getLink(column));
-                        }
-                        break;
-                    case LIST:
-                        // LIST never be null
-                        flatList.add(formatList(rowData.getLinkList(column)));
-                        break;
-                    default:
-                        flatList.add("unknown column type: " + rowData.getColumnType(column));
-                        break;
-                }
-            }
-        }
-
-        if (limit < table.size()) {
-            for (int column = 0; column < numColumns; column++) {
-                flatList.add("{truncated}");
-            }
-        }
-
-        return flatList;
+        return null;
     }
 
     private static class GetDatabaseTableNamesRequest {
-        @JsonProperty(required = true)
-        public String databaseId;
+
     }
 
     private static class GetDatabaseTableNamesResponse implements JsonRpcResult {
-        @JsonProperty(required = true)
-        public List<String> tableNames;
     }
 
     private static class ExecuteSQLRequest {
-        @JsonProperty(required = true)
-        public String databaseId;
-
-        @JsonProperty(required = true)
-        public String query;
     }
 
     private static class ExecuteSQLResponse implements JsonRpcResult {
-        @JsonProperty
-        public List<String> columnNames;
-
-        @JsonProperty
-        public List<Object> values;
-
-        @JsonProperty
-        public Error sqlError;
     }
 
     public static class AddDatabaseEvent {
-        @JsonProperty(required = true)
-        public DatabaseObject database;
     }
 
     public static class DatabaseObject {
-        @JsonProperty(required = true)
-        public String id;
-
-        @JsonProperty(required = true)
-        public String domain;
-
-        @JsonProperty(required = true)
-        public String name;
-
-        @JsonProperty(required = true)
-        public String version;
     }
 
     public static class Error {
-        @JsonProperty(required = true)
-        public String message;
-
-        @JsonProperty(required = true)
-        public int code;
     }
 
     private String formatDate(Date date) {
-        if (dateTimeFormatter == null) {
-            dateTimeFormatter = SimpleDateFormat.getDateTimeInstance(SimpleDateFormat.LONG, SimpleDateFormat.LONG);
-        }
-        return dateTimeFormatter.format(date) + " (" + date.getTime() + ')';
+        return null;
     }
 
     private String formatList(LinkView linkList) {
-        final StringBuilder sb = new StringBuilder(linkList.getTargetTable().getName());
-        sb.append("{");
-
-        final long size = linkList.size();
-        for (long pos = 0; pos < size; pos++) {
-            sb.append(linkList.getTargetRowIndex(pos));
-            sb.append(',');
-        }
-        if (size != 0) {
-            // remove last ','
-            sb.setLength(sb.length() - 1);
-        }
-
-        sb.append("}");
-        return sb.toString();
+        return null;
     }
 
     static class RowFetcher {
-        private static RowFetcher sInstance = new RowFetcher();
-
         static RowFetcher getInstance() {
-            return sInstance;
+            return null;
         }
 
         RowFetcher() {
         }
 
         Row getRow(Table targetTable, long index) {
-            return targetTable.getCheckedRow(index);
+            return null;
         }
     }
 
     static class RowWrapper {
         static RowWrapper wrap(Row row) {
-            return new RowWrapper(row);
+            return null;
         }
 
-        private final Row row;
-
         RowWrapper(Row row) {
-            this.row = row;
         }
 
         long getIndex() {
-            return row.getIndex();
+            return 0;
         }
 
         StethoRealmFieldType getColumnType(long columnIndex) {
-            // io.realm.RealmFieldType
-            final Enum<?> columnType = row.getColumnType(columnIndex);
-            final String name = columnType.name();
-            if (name.equals("INTEGER")) {
-                return StethoRealmFieldType.INTEGER;
-            }
-            if (name.equals("BOOLEAN")) {
-                return StethoRealmFieldType.BOOLEAN;
-            }
-            if (name.equals("STRING")) {
-                return StethoRealmFieldType.STRING;
-            }
-            if (name.equals("BINARY")) {
-                return StethoRealmFieldType.BINARY;
-            }
-            if (name.equals("UNSUPPORTED_TABLE")) {
-                return StethoRealmFieldType.UNSUPPORTED_TABLE;
-            }
-            if (name.equals("UNSUPPORTED_MIXED")) {
-                return StethoRealmFieldType.UNSUPPORTED_MIXED;
-            }
-            if (name.equals("UNSUPPORTED_DATE")) {
-                return StethoRealmFieldType.OLD_DATE;
-            }
-            if (name.equals("DATE")) {
-                return StethoRealmFieldType.DATE;
-            }
-            if (name.equals("FLOAT")) {
-                return StethoRealmFieldType.FLOAT;
-            }
-            if (name.equals("DOUBLE")) {
-                return StethoRealmFieldType.DOUBLE;
-            }
-            if (name.equals("OBJECT")) {
-                return StethoRealmFieldType.OBJECT;
-            }
-            if (name.equals("LIST")) {
-                return StethoRealmFieldType.LIST;
-            }
-            return StethoRealmFieldType.UNKNOWN;
+            return null;
         }
 
         boolean isNull(long columnIndex) {
-            return row.isNull(columnIndex);
+            return false;
         }
 
         boolean isNullLink(long columnIndex) {
-            return row.isNullLink(columnIndex);
+            return false;
         }
 
         long getLong(long columnIndex) {
-            return row.getLong(columnIndex);
+            return 0;
         }
 
         boolean getBoolean(long columnIndex) {
-            return row.getBoolean(columnIndex);
+            return false;
         }
 
         float getFloat(long columnIndex) {
-            return row.getFloat(columnIndex);
+            return 0;
         }
 
         double getDouble(long columnIndex) {
-            return row.getDouble(columnIndex);
+            return 0;
         }
 
         Date getDate(long columnIndex) {
-            return row.getDate(columnIndex);
+            return null;
         }
 
         String getString(long columnIndex) {
-            return row.getString(columnIndex);
+            return null;
         }
 
         byte[] getBinaryByteArray(long columnIndex) {
-            return row.getBinaryByteArray(columnIndex);
+            return null;
         }
 
         long getLink(long columnIndex) {
-            return row.getLink(columnIndex);
+            return 0;
         }
 
         LinkView getLinkList(long columnIndex) {
-            return row.getLinkList(columnIndex);
+            return null;
         }
     }
 }
